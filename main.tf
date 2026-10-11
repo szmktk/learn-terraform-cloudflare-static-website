@@ -18,7 +18,7 @@ provider "aws" {
 provider "cloudflare" {}
 
 ###############################################################################
-# Cloudflare zone
+# Cloudflare zone and origin IP ranges
 ###############################################################################
 
 data "cloudflare_zones" "domain" {
@@ -27,6 +27,31 @@ data "cloudflare_zones" "domain" {
 
 locals {
   zone_id = data.cloudflare_zones.domain.result[0].id
+}
+
+# Cloudflare publishes the IP ranges it uses to connect to origin servers.
+# Fetching them at plan time keeps the bucket policy below current; sorting
+# makes the list independent of the response ordering.
+data "http" "cloudflare_ips" {
+  url = "https://api.cloudflare.com/client/v4/ips"
+
+  retry {
+    attempts = 2
+  }
+
+  lifecycle {
+    postcondition {
+      condition     = self.status_code == 200
+      error_message = "Cloudflare IP ranges endpoint returned status ${self.status_code}."
+    }
+  }
+}
+
+locals {
+  cloudflare_ip_ranges = sort(distinct(concat(
+    jsondecode(data.http.cloudflare_ips.response_body).result.ipv4_cidrs,
+    jsondecode(data.http.cloudflare_ips.response_body).result.ipv6_cidrs,
+  )))
 }
 
 ###############################################################################
@@ -81,11 +106,20 @@ resource "aws_s3_bucket_policy" "site" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid       = "PublicReadGetObject"
+        Sid       = "CloudflareReadGetObject"
         Effect    = "Allow"
         Principal = "*"
         Action    = "s3:GetObject"
         Resource  = "${aws_s3_bucket.site.arn}/*"
+
+        # Only Cloudflare edge servers can read the objects, so the site is
+        # reachable only through the proxied DNS records (TLS + CDN) and the
+        # raw S3 website endpoint stays closed to everyone else.
+        Condition = {
+          IpAddress = {
+            "aws:SourceIp" = local.cloudflare_ip_ranges
+          }
+        }
       },
     ]
   })

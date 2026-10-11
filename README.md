@@ -14,7 +14,7 @@ here is updated for current provider versions (AWS `~> 6.0`, Cloudflare `~> 5.0`
 
 | File | Contents |
 | --- | --- |
-| `main.tf` | Providers, Cloudflare zone lookup, S3 bucket + website hosting + public read policy, website upload, Cloudflare DNS records |
+| `main.tf` | Providers, Cloudflare zone and IP range lookup, S3 bucket + website hosting + Cloudflare-only read policy, website upload, Cloudflare DNS records |
 | `cloudflare_rules.tf` | Cloudflare encryption mode, Always Use HTTPS, and the `/learn` redirect rule |
 | `variables.tf` | Input variables |
 | `outputs.tf` | Bucket name, S3 website endpoint, domain, site URL, zone ID |
@@ -29,6 +29,8 @@ endpoint over HTTP → `index.html`.
 - OpenTofu 1.6+ (`tofu version`) or Terraform 1.6+
 - AWS credentials configured for the CLI/SDK, for example `aws sso login`
 - A domain whose DNS is managed by Cloudflare (nameservers pointing to Cloudflare)
+- Outbound HTTPS access to `api.cloudflare.com`: the `hashicorp/http` provider reads Cloudflare's
+  published IP ranges at plan time
 - A Cloudflare API token, exported as an environment variable:
 
   ```
@@ -97,6 +99,15 @@ Then open the `website_url` output (`https://<your domain>`).
   phase; adopt it with `tofu import 'cloudflare_ruleset.redirects[0]' '<zone_id>/<ruleset_id>'`.
 - **ACLs are not used.** Object ownership is `BucketOwnerEnforced` (ACLs disabled) and anonymous
   access is granted by the bucket policy, so `block_public_acls` and `ignore_public_acls` stay on.
+- **The bucket is readable only from Cloudflare's IP ranges.** `data.http.cloudflare_ips` reads the
+  published ranges from `https://api.cloudflare.com/client/v4/ips` on every plan and apply, and the
+  bucket policy allows `s3:GetObject` only when `aws:SourceIp` matches one of them (IPv4 and IPv6).
+  Requesting the S3 website endpoint directly returns 403 — test through `https://<your domain>`.
+  When Cloudflare changes its ranges, the next `tofu plan` shows a policy diff; apply it. Unproxying
+  (grey-clouding) a DNS record breaks the site, because visitor IPs are not in the allowlist.
+- **`www` and the apex both serve the site.** `cloudflare_dns_record.www` is a proxied CNAME to the
+  apex, so both hostnames return the same content; Cloudflare does not canonicalize them for you.
+  For a 301 from one to the other, add a rule to `cloudflare_ruleset.redirects`.
 - The `/learn` redirect rule is tutorial scaffolding. Delete the `cloudflare_ruleset.redirects`
   resource, or its rule, and re-run `tofu apply` to remove it.
 
