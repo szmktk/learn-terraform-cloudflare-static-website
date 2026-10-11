@@ -7,7 +7,7 @@ No AWS ACM certificate and no CloudFront distribution: Cloudflare proxies traffi
 S3 website endpoint and supplies the edge certificate and the CDN.
 
 This repository is a refreshed version of the retired HashiCorp tutorial *Host a static website with
-S3 and Cloudflare*. The archived tutorial text is in [`tutorial.md`](tutorial.md); the configuration
+S3 and Cloudflare*. The archived tutorial text is in [`tutorial.md`](./docs/tutorial.md); the configuration
 here is updated for current provider versions (AWS `~> 6.0`, Cloudflare `~> 5.0`) and OpenTofu.
 
 ### How it works
