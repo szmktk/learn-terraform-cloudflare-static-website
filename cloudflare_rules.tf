@@ -35,32 +35,32 @@ resource "cloudflare_zone_setting" "always_use_https" {
 # as "Dynamic URL Redirects" in the token editor, and as "Single Redirect Edit"
 # in Cloudflare's permissions reference). Without it, POST to
 # /zones/{zone_id}/rulesets returns 403.
-resource "cloudflare_ruleset" "redirects" {
-  count = var.enable_cloudflare_rules ? 1 : 0
+# resource "cloudflare_ruleset" "redirects" {
+#   count = var.enable_cloudflare_rules ? 1 : 0
 
-  zone_id = local.zone_id
-  kind    = "zone"
-  phase   = "http_request_dynamic_redirect"
-  name    = "Static website redirects"
+#   zone_id = local.zone_id
+#   kind    = "zone"
+#   phase   = "http_request_dynamic_redirect"
+#   name    = "Static website redirects"
 
-  rules = [
-    {
-      ref         = "redirect_learn_to_terraform_docs"
-      description = "Redirect ${var.site_domain}/learn to the Terraform docs"
-      expression  = "(http.host eq \"${var.site_domain}\" and http.request.uri.path eq \"/learn\")"
-      action      = "redirect"
-      enabled     = true
+#   rules = [
+#     {
+#       ref         = "redirect_learn_to_terraform_docs"
+#       description = "Redirect ${var.site_domain}/learn to the Terraform docs"
+#       expression  = "(http.host eq \"${var.site_domain}\" and http.request.uri.path eq \"/learn\")"
+#       action      = "redirect"
+#       enabled     = true
 
-      action_parameters = {
-        from_value = {
-          status_code           = 302
-          preserve_query_string = false
+#       action_parameters = {
+#         from_value = {
+#           status_code           = 302
+#           preserve_query_string = false
 
-          target_url = {
-            value = "https://developer.hashicorp.com/terraform"
-          }
-        }
-      }
-    },
-  ]
-}
+#           target_url = {
+#             value = "https://developer.hashicorp.com/terraform"
+#           }
+#         }
+#       }
+#     },
+#   ]
+# }
