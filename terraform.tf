@@ -2,19 +2,16 @@
 # SPDX-License-Identifier: MPL-2.0
 
 terraform {
+  required_version = ">= 1.6.0"
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "4.0.0"
+      version = "~> 6.0"
     }
     cloudflare = {
       source  = "cloudflare/cloudflare"
-      version = "2.19.2"
-    }
-    random = {
-      source  = "hashicorp/random"
-      version = "3.1.0"
+      version = "~> 5.0"
     }
   }
 }
-
