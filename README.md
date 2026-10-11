@@ -55,7 +55,7 @@ and lose the HTTP→HTTPS redirect.
 
 | Name | Default | Description |
 | --- | --- | --- |
-| `aws_region` | `us-east-1` | Region for the S3 bucket |
+| `aws_region`  | - | Region for the S3 bucket |
 | `site_domain` | – | Lowercase domain name; also used as the S3 bucket name |
 | `enable_cloudflare_rules` | `true` | Manage Cloudflare encryption mode, Always Use HTTPS and redirect rules |
 
