@@ -22,6 +22,6 @@ variable "site_domain" {
 
 variable "enable_cloudflare_rules" {
   type        = bool
-  description = "Manage the Cloudflare encryption mode, Always Use HTTPS, and redirect rules. Set to false if your API token does not have Zone Settings Edit and Rules Edit permissions."
+  description = "Manage the Cloudflare encryption mode, Always Use HTTPS, and redirect rules. Needs the Zone Settings Write and Dynamic URL Redirects Write token permissions. Setting this to false also removes the two zone settings from state."
   default     = true
 }

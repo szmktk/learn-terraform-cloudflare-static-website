@@ -30,6 +30,11 @@ resource "cloudflare_zone_setting" "always_use_https" {
 
 # Replaces the `forwarding_url` Page Rule from the tutorial: temporarily
 # redirect <domain>/learn to the Terraform documentation.
+#
+# Needs the zone-scoped `Dynamic URL Redirects Write` token permission (listed
+# as "Dynamic URL Redirects" in the token editor, and as "Single Redirect Edit"
+# in Cloudflare's permissions reference). Without it, POST to
+# /zones/{zone_id}/rulesets returns 403.
 resource "cloudflare_ruleset" "redirects" {
   count = var.enable_cloudflare_rules ? 1 : 0
 

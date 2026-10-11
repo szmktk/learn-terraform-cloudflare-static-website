@@ -37,25 +37,50 @@ endpoint over HTTP → `index.html`.
   export CLOUDFLARE_API_TOKEN=<your token>
   ```
 
-Create the token as a **custom token** scoped to **Include → Specific zone → your domain** with
-these permissions:
+Create a **custom token**. Each permission row in the token editor has three dropdowns — set
+**Type = Zone** first, because the Permission list depends on it — then grant:
 
-| Type | Permission | Access level | Used by |
-| --- | --- | --- | --- |
-| Zone | Zone | Read | `data.cloudflare_zones` |
-| Zone | DNS | Edit | `cloudflare_dns_record` |
-| Zone | Zone Settings | Edit | `cloudflare_zone_setting` |
-| Zone | Rules | Edit | `cloudflare_ruleset` |
+| Type | Permission (dashboard) | Access | Stored in the token as | Used by |
+| --- | --- | --- | --- | --- |
+| Zone | Zone | Read | `Zone Read` | `data.cloudflare_zones` |
+| Zone | DNS | Edit | `DNS Write` | `cloudflare_dns_record` |
+| Zone | Zone Settings | Edit | `Zone Settings Write` | `cloudflare_zone_setting` |
+| Zone | Dynamic URL Redirects | Write | `Dynamic URL Redirects Write` | `cloudflare_ruleset` |
 
-If you cannot grant Zone Settings or Rules edit, set `enable_cloudflare_rules = false` in
-`terraform.tfvars`. The site still works; you then manage the encryption mode and redirects yourself
-and lose the HTTP→HTTPS redirect.
+Cloudflare's [permissions reference](https://developers.cloudflare.com/fundamentals/api/reference/permissions/)
+calls the last one `Single Redirect Edit`; the token stores it as `Dynamic URL Redirects Write`. Same
+permission — zone-level Single Redirects. The dashboard says `Edit` where the API says `Write`.
+Single Redirects are available on every plan including Free (10 rules per zone).
+
+Two traps worth knowing:
+
+- Zone permissions live in the **zone** list — "All zones in \<your account\>" or "Specific zone".
+  Searching the *Account* list for "redirect" returns only `Mass URL Redirects`, which is *Bulk*
+  Redirects and does not authorize `POST /zones/{zone_id}/rulesets`.
+- None of Cloudflare's [built-in token templates](https://developers.cloudflare.com/fundamentals/api/reference/template/)
+  grants the redirect permission, so a token created from a template needs it added by hand.
+  Template extras such as `Cache Purge`, `Page Rules Write` and `Analytics Read` are unused here.
+
+Under **Zone Resources**, choose Include → Specific zone → your domain (Include → All zones also
+works). Editing a token's permissions does not rotate its secret, so `CLOUDFLARE_API_TOKEN` stays
+valid.
+
+To see what a token actually holds, open its **Token Summary** page
+([API Tokens](https://dash.cloudflare.com/profile/api-tokens) → the token → Summary): it prints the
+token JSON, and `policies[].permission_groups[].name` lists the four names above. Introspecting this
+over the API does not work with a zone-scoped token — `GET /user/tokens` needs user-level
+authentication and returns error `9109`.
+
+`enable_cloudflare_rules = false` in `terraform.tfvars` skips all three rule resources — including
+the two `cloudflare_zone_setting` ones. On an already-applied deployment that plans their destroy,
+and `ssl = flexible` is what makes the HTTP-only S3 origin work. To drop only the `/learn` redirect,
+delete the `cloudflare_ruleset.redirects` resource instead.
 
 ### Variables
 
 | Name | Default | Description |
 | --- | --- | --- |
-| `aws_region`  | - | Region for the S3 bucket |
+| `aws_region`  | – | Region for the S3 bucket |
 | `site_domain` | – | Lowercase domain name; also used as the S3 bucket name |
 | `enable_cloudflare_rules` | `true` | Manage Cloudflare encryption mode, Always Use HTTPS and redirect rules |
 
