@@ -20,6 +20,7 @@ here is updated for current provider versions (AWS `~> 6.0`, Cloudflare `~> 5.0`
 | `outputs.tf` | Bucket name, S3 website endpoint, domain, site URL, zone ID |
 | `terraform.tf` | `required_version` and `required_providers` |
 | `website/` | [Terramino](https://github.com/hashicorp-education/learn-terramino) demo site uploaded to the bucket |
+| `tests/` | pytest checks that probe the deployed site (see [Tests](#tests)) |
 
 Request flow: browser → Cloudflare edge (HTTPS, Cloudflare certificate, CDN cache) → S3 website
 endpoint over HTTP → `index.html`.
@@ -133,8 +134,34 @@ Then open the `website_url` output (`https://<your domain>`).
 - **`www` and the apex both serve the site.** `cloudflare_dns_record.www` is a proxied CNAME to the
   apex, so both hostnames return the same content; Cloudflare does not canonicalize them for you.
   For a 301 from one to the other, add a rule to `cloudflare_ruleset.redirects`.
-- The `/learn` redirect rule is tutorial scaffolding. Delete the `cloudflare_ruleset.redirects`
-  resource, or its rule, and re-run `tofu apply` to remove it.
+- The `/learn` redirect rule is tutorial scaffolding, so `cloudflare_ruleset.redirects` is commented
+  out in `cloudflare_rules.tf`. Uncomment it and re-run `tofu apply` to turn the redirect on; it
+  needs the `Dynamic URL Redirects Write` token permission.
+
+### Tests
+
+`tests/` holds black-box pytest checks against the deployed site: plain HTTP only, no AWS or
+Cloudflare API access and no credentials. The domain and bucket endpoint come from
+`tofu output -json`, or from `SITE_DOMAIN` / `SITE_BUCKET_ENDPOINT` when you set them yourself.
+
+```
+cd tests
+uv run pytest
+```
+
+| Test | Asserts |
+| --- | --- |
+| `test_apex_http_redirects_to_https` | `http://<domain>/` → 301 to `https://<domain>/`, answered by Cloudflare |
+| `test_www_http_redirects_to_https` | `http://www.<domain>/` → 301 to HTTPS |
+| `test_https_serves_the_website` | HTTPS returns 200 HTML through the proxy — a 5xx means the encryption mode is not `flexible` |
+| `test_website_endpoint_denies_direct_access` | `http://<bucket>.s3-website.<region>.amazonaws.com/` → 403 `AccessDenied` from `AmazonS3` |
+| `test_website_endpoint_denies_direct_object_access` | `/index.html` on that endpoint → 403 `AccessDenied` |
+| `test_website_endpoint_denies_direct_asset_access` | `/background.png` on that endpoint → 403 `AccessDenied` |
+| `test_same_object_is_reachable_through_cloudflare` | the same object returns 200 via Cloudflare, proving the 403s come from the IP condition and not from a broken site |
+
+Run them from outside Cloudflare's network — a laptop or a CI runner. From a host inside Cloudflare's
+IP ranges the S3 endpoint answers and the origin tests fail by design. With no deployed stack and
+neither environment variable set, every test skips instead of failing.
 
 ### Clean up
 

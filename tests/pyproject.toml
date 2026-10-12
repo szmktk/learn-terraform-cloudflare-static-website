@@ -1,0 +1,16 @@
+[project]
+name = "static-website-infra-tests"
+version = "0.1.0"
+description = "Black-box tests for the S3 + Cloudflare static website deployed from the parent directory"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.28",
+    "pytest>=8.3",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+addopts = "-ra --strict-config"
