@@ -51,6 +51,10 @@ class Site:
         return f"http://www.{self.domain}/"
 
     @property
+    def www_https_url(self) -> str:
+        return f"https://www.{self.domain}/"
+
+    @property
     def bucket_url(self) -> str:
         """Raw S3 website endpoint. HTTP only: S3 website endpoints do not serve HTTPS."""
         return f"http://{self.bucket_endpoint}"

@@ -28,39 +28,65 @@ resource "cloudflare_zone_setting" "always_use_https" {
   value      = "on"
 }
 
-# Replaces the `forwarding_url` Page Rule from the tutorial: temporarily
-# redirect <domain>/learn to the Terraform documentation.
+# Canonicalises `www` to the apex domain.
+#
+# Cloudflare forwards the hostname the visitor requested as the Host header, and
+# S3 website hosting resolves the bucket from that header. Without this rule
+# `https://www.<domain>/` reaches S3 as bucket `www.<domain>` and comes back as
+# 404 NoSuchBucket, so the redirect from plain HTTP lands on a broken page.
+# Redirecting keeps a single canonical hostname; the alternative is an Origin
+# Rule that rewrites the Host header, which needs another token permission.
 #
 # Needs the zone-scoped `Dynamic URL Redirects Write` token permission (listed
 # as "Dynamic URL Redirects" in the token editor, and as "Single Redirect Edit"
 # in Cloudflare's permissions reference). Without it, POST to
 # /zones/{zone_id}/rulesets returns 403.
-# resource "cloudflare_ruleset" "redirects" {
-#   count = var.enable_cloudflare_rules ? 1 : 0
+resource "cloudflare_ruleset" "redirects" {
+  count = var.enable_cloudflare_rules ? 1 : 0
 
-#   zone_id = local.zone_id
-#   kind    = "zone"
-#   phase   = "http_request_dynamic_redirect"
-#   name    = "Static website redirects"
+  zone_id = local.zone_id
+  kind    = "zone"
+  phase   = "http_request_dynamic_redirect"
+  name    = "Static website redirects"
 
-#   rules = [
-#     {
-#       ref         = "redirect_learn_to_terraform_docs"
-#       description = "Redirect ${var.site_domain}/learn to the Terraform docs"
-#       expression  = "(http.host eq \"${var.site_domain}\" and http.request.uri.path eq \"/learn\")"
-#       action      = "redirect"
-#       enabled     = true
+  rules = [
+    {
+      ref         = "redirect_www_to_apex"
+      description = "Redirect www.${var.site_domain} to ${var.site_domain}"
+      expression  = "(http.host eq \"www.${var.site_domain}\")"
+      action      = "redirect"
+      enabled     = true
 
-#       action_parameters = {
-#         from_value = {
-#           status_code           = 302
-#           preserve_query_string = false
+      action_parameters = {
+        from_value = {
+          status_code           = 301
+          preserve_query_string = true
 
-#           target_url = {
-#             value = "https://developer.hashicorp.com/terraform"
-#           }
+          target_url = {
+            expression = "concat(\"https://${var.site_domain}\", http.request.uri.path)"
+          }
+        }
+      }
+    },
+  ]
+}
+
+# The tutorial also forwarded <domain>/learn to the Terraform documentation.
+# Add this rule to the ruleset above if you want it back:
+#
+#   {
+#     ref         = "redirect_learn_to_terraform_docs"
+#     description = "Redirect ${var.site_domain}/learn to the Terraform docs"
+#     expression  = "(http.host eq \"${var.site_domain}\" and http.request.uri.path eq \"/learn\")"
+#     action      = "redirect"
+#     enabled     = true
+#     action_parameters = {
+#       from_value = {
+#         status_code           = 302
+#         preserve_query_string = false
+#         target_url = {
+#           value = "https://developer.hashicorp.com/terraform"
 #         }
 #       }
-#     },
-#   ]
-# }
+#     }
+#   }

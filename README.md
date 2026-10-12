@@ -15,7 +15,7 @@ here is updated for current provider versions (AWS `~> 6.0`, Cloudflare `~> 5.0`
 | File | Contents |
 | --- | --- |
 | `main.tf` | Providers, Cloudflare zone and IP range lookup, S3 bucket + website hosting + Cloudflare-only read policy, website upload, Cloudflare DNS records |
-| `cloudflare_rules.tf` | Cloudflare encryption mode, Always Use HTTPS, and the `/learn` redirect rule |
+| `cloudflare_rules.tf` | Cloudflare encryption mode, Always Use HTTPS, and the `www` → apex redirect rule |
 | `variables.tf` | Input variables |
 | `outputs.tf` | Bucket name, S3 website endpoint, domain, site URL, zone ID |
 | `terraform.tf` | `required_version` and `required_providers` |
@@ -131,12 +131,14 @@ Then open the `website_url` output (`https://<your domain>`).
   Requesting the S3 website endpoint directly returns 403 — test through `https://<your domain>`.
   When Cloudflare changes its ranges, the next `tofu plan` shows a policy diff; apply it. Unproxying
   (grey-clouding) a DNS record breaks the site, because visitor IPs are not in the allowlist.
-- **`www` and the apex both serve the site.** `cloudflare_dns_record.www` is a proxied CNAME to the
-  apex, so both hostnames return the same content; Cloudflare does not canonicalize them for you.
-  For a 301 from one to the other, add a rule to `cloudflare_ruleset.redirects`.
-- The `/learn` redirect rule is tutorial scaffolding, so `cloudflare_ruleset.redirects` is commented
-  out in `cloudflare_rules.tf`. Uncomment it and re-run `tofu apply` to turn the redirect on; it
-  needs the `Dynamic URL Redirects Write` token permission.
+- **`www` 301s to the apex.** `cloudflare_dns_record.www` is a proxied CNAME, and Cloudflare forwards
+  the hostname the visitor requested to the origin. S3 website hosting resolves the bucket from that
+  Host header, so serving `www` directly returns 404 `NoSuchBucket` for bucket `www.<domain>`.
+  `cloudflare_ruleset.redirects` therefore canonicalises `www` to the apex, preserving path and query
+  string. Serving both hostnames instead would need an Origin Rule that rewrites the Host header.
+- The tutorial's `/learn` forwarding rule is not deployed. `cloudflare_rules.tf` keeps it as a
+  commented-out rule you can paste into `cloudflare_ruleset.redirects`; it needs the same
+  `Dynamic URL Redirects Write` token permission.
 
 ### Tests
 
@@ -153,6 +155,8 @@ uv run pytest
 | --- | --- |
 | `test_apex_http_redirects_to_https` | `http://<domain>/` → 301 to `https://<domain>/`, answered by Cloudflare |
 | `test_www_http_redirects_to_https` | `http://www.<domain>/` → 301 to HTTPS |
+| `test_www_https_redirects_to_the_apex` | `https://www.<domain>/` → 301 to `https://<domain>/` instead of a 404 `NoSuchBucket` from S3 |
+| `test_www_http_reaches_the_apex_site` | the whole chain from `http://www.<domain>/` ends on 200 HTML at the apex |
 | `test_https_serves_the_website` | HTTPS returns 200 HTML through the proxy — a 5xx means the encryption mode is not `flexible` |
 | `test_website_endpoint_denies_direct_access` | `http://<bucket>.s3-website.<region>.amazonaws.com/` → 403 `AccessDenied` from `AmazonS3` |
 | `test_website_endpoint_denies_direct_object_access` | `/index.html` on that endpoint → 403 `AccessDenied` |
