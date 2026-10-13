@@ -15,7 +15,7 @@ here is updated for current provider versions (AWS `~> 6.0`, Cloudflare `~> 5.0`
 | File | Contents |
 | --- | --- |
 | `main.tf` | Providers, Cloudflare zone and IP range lookup, S3 bucket + website hosting + Cloudflare-only read policy, website upload, Cloudflare DNS records |
-| `cloudflare_rules.tf` | Cloudflare encryption mode, Always Use HTTPS, and the `www` → apex redirect rule |
+| `cloudflare_rules.tf` | Cloudflare encryption mode, Always Use HTTPS, the clean URL rewrite, and the `www` → apex redirect rule |
 | `variables.tf` | Input variables |
 | `outputs.tf` | Bucket name, S3 website endpoint, domain, site URL, zone ID |
 | `terraform.tf` | `required_version` and `required_providers` |
@@ -46,12 +46,15 @@ Create a **custom token**. Each permission row in the token editor has three dro
 | Zone | Zone | Read | `Zone Read` | `data.cloudflare_zones` |
 | Zone | DNS | Edit | `DNS Write` | `cloudflare_dns_record` |
 | Zone | Zone Settings | Edit | `Zone Settings Write` | `cloudflare_zone_setting` |
-| Zone | Dynamic URL Redirects | Write | `Dynamic URL Redirects Write` | `cloudflare_ruleset` |
+| Zone | Transform Rules | Edit | `Zone Transform Rules Write` | `cloudflare_ruleset.clean_urls` |
+| Zone | Dynamic URL Redirects | Write | `Dynamic URL Redirects Write` | `cloudflare_ruleset.redirects` |
 
 Cloudflare's [permissions reference](https://developers.cloudflare.com/fundamentals/api/reference/permissions/)
 calls the last one `Single Redirect Edit`; the token stores it as `Dynamic URL Redirects Write`. Same
 permission — zone-level Single Redirects. The dashboard says `Edit` where the API says `Write`.
-Single Redirects are available on every plan including Free (10 rules per zone).
+Single Redirects are available on every plan including Free (10 rules per zone). Transform Rules are
+a separate permission for a separate phase: granting only the redirect one leaves
+`cloudflare_ruleset.clean_urls` failing with 403.
 
 Two traps worth knowing:
 
@@ -68,14 +71,15 @@ valid.
 
 To see what a token actually holds, open its **Token Summary** page
 ([API Tokens](https://dash.cloudflare.com/profile/api-tokens) → the token → Summary): it prints the
-token JSON, and `policies[].permission_groups[].name` lists the four names above. Introspecting this
+token JSON, and `policies[].permission_groups[].name` lists the five names above. Introspecting this
 over the API does not work with a zone-scoped token — `GET /user/tokens` needs user-level
 authentication and returns error `9109`.
 
-`enable_cloudflare_rules = false` in `terraform.tfvars` skips all three rule resources — including
-the two `cloudflare_zone_setting` ones. On an already-applied deployment that plans their destroy,
-and `ssl = flexible` is what makes the HTTP-only S3 origin work. To drop only the `/learn` redirect,
-delete the `cloudflare_ruleset.redirects` resource instead.
+`enable_cloudflare_rules = false` in `terraform.tfvars` skips every rule resource — the two
+`cloudflare_zone_setting` ones and `cloudflare_ruleset.clean_urls`. On an already-applied deployment
+that plans their destroy: `ssl = flexible` is what makes the HTTP-only S3 origin work, and dropping
+the rewrite makes extensionless URLs return 404 again on a generator that emits flat `slug.html`.
+To drop only the `/learn` redirect, delete the `cloudflare_ruleset.redirects` resource instead.
 
 ### Variables
 
@@ -83,7 +87,7 @@ delete the `cloudflare_ruleset.redirects` resource instead.
 | --- | --- | --- |
 | `aws_region`  | – | Region for the S3 bucket |
 | `site_domain` | – | Lowercase domain name; also used as the S3 bucket name |
-| `enable_cloudflare_rules` | `true` | Manage Cloudflare encryption mode, Always Use HTTPS and redirect rules |
+| `enable_cloudflare_rules` | `true` | Manage Cloudflare encryption mode, Always Use HTTPS, the clean URL rewrite and redirect rules |
 
 ### Deploy
 
@@ -116,6 +120,18 @@ Then open the `website_url` output (`https://<your domain>`).
   Cloudflare must reach the origin over HTTP. Cloudflare zones default to Automatic SSL/TLS, which
   only upgrades to more secure modes, so this config pins `flexible`; without it the site can
   return a 502/525 error.
+- **Extensionless URLs need the rewrite rule.** S3's index document only resolves a path that ends
+  in a slash: for `/slug` it looks for an object named `slug`, then for `slug/index.html`, and 404s
+  when neither exists ([AWS docs](https://docs.aws.amazon.com/AmazonS3/latest/userguide/IndexDocumentSupport.html)).
+  [Hugo](https://gohugo.io/) emits `slug/index.html` by default, so a Hugo site works here with no rule.
+  Quartz emits flat `slug.html` ([Quartz hosting docs](https://quartz.jzhao.xyz/hosting): "Quartz 
+  generates files in the format of `file.html` instead of `file/index.html`") and has no 
+  configuration option to change that, so `cloudflare_ruleset.clean_urls` rewrites `/slug` to 
+  `/slug.html` at the edge. The rewrite is invisible to the browser — the address bar keeps the
+  clean URL. Paths that already carry an extension and paths ending in `/` are excluded by the rule 
+  expression. If you created Transform Rules in the dashboard by hand, apply fails because the zone
+  already has an entrypoint ruleset for `http_request_transform`; adopt it with
+  `tofu import 'cloudflare_ruleset.clean_urls[0]' '<zone_id>/<ruleset_id>'`.
 - **Page Rules are deprecated.** The tutorial's two `cloudflare_page_rule` resources are replaced by
   the `always_use_https` zone setting and a Redirect Rule (`cloudflare_ruleset`, phase
   `http_request_dynamic_redirect`), as described in Cloudflare's
@@ -162,6 +178,11 @@ uv run pytest
 | `test_website_endpoint_denies_direct_object_access` | `/index.html` on that endpoint → 403 `AccessDenied` |
 | `test_website_endpoint_denies_direct_asset_access` | `/background.png` on that endpoint → 403 `AccessDenied` |
 | `test_same_object_is_reachable_through_cloudflare` | the same object returns 200 via Cloudflare, proving the 403s come from the IP condition and not from a broken site |
+| `test_extensionless_urls_serve_html` | every clean URL from `sitemap.xml` returns 200 HTML — the bug the rewrite rule fixes |
+| `test_explicit_html_urls_still_resolve` | the same pages still answer at `<slug>.html`, so the rewrite broke nothing |
+| `test_assets_are_not_rewritten` | a stylesheet referenced by the homepage returns 200 `text/css` — control proving the rule skips paths with an extension |
+| `test_folder_urls_still_use_the_index_document` | `/tags/` still resolves through S3's index document (skips when the site has no folder page) |
+| `test_missing_page_still_returns_404` | a nonexistent path still 404s, so the rule adds an extension rather than masking misses |
 
 Run them from outside Cloudflare's network — a laptop or a CI runner. From a host inside Cloudflare's
 IP ranges the S3 endpoint answers and the origin tests fail by design. With no deployed stack and

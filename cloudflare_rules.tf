@@ -28,6 +28,58 @@ resource "cloudflare_zone_setting" "always_use_https" {
   value      = "on"
 }
 
+# Quartz (and other generators that emit "pretty URLs" the other way round)
+# writes `slug.html` rather than `slug/index.html`, so the S3 index document
+# cannot resolve an extensionless request: S3 looks for an object literally
+# named `slug`, finds nothing, and there is no `slug/index.html` to fall back
+# to, so it returns 404 NoSuchKey.
+# https://quartz.jzhao.xyz/hosting ("Quartz generates files in the format of
+# file.html instead of file/index.html")
+# https://docs.aws.amazon.com/AmazonS3/latest/userguide/IndexDocumentSupport.html
+#
+# Generators that do emit `slug/index.html` (Hugo by default) need no rule here:
+# S3 answers `/slug` with a 302 to `/slug/` and then serves `slug/index.html`.
+#
+# This rewrites the path at the edge, so the browser keeps the clean URL while
+# Cloudflare fetches `<slug>.html` from the origin. Paths that already carry a
+# file extension (CSS, JS, JSON, images) are skipped by the first clause; paths
+# ending in `/` are left to the S3 index document.
+#
+# Needs the zone-scoped `Zone Transform Rules Write` token permission, listed as
+# "Transform Rules" in the token editor. This is NOT the `Dynamic URL Redirects
+# Write` permission the redirect rule below uses: a different phase needs a
+# different permission. Without it, POST to /zones/{zone_id}/rulesets returns 403.
+resource "cloudflare_ruleset" "clean_urls" {
+  count = var.enable_cloudflare_rules ? 1 : 0
+
+  zone_id = local.zone_id
+  kind    = "zone"
+  phase   = "http_request_transform"
+  name    = "Static website clean URLs"
+
+  rules = [
+    {
+      ref         = "append_html_to_extensionless_paths"
+      description = "Serve ${var.site_domain}/<slug> from the <slug>.html object"
+      expression = join(" ", [
+        "(http.host eq \"${var.site_domain}\" or http.host eq \"www.${var.site_domain}\")",
+        "and not http.request.uri.path contains \".\"",
+        "and not ends_with(http.request.uri.path, \"/\")",
+      ])
+      action  = "rewrite"
+      enabled = true
+
+      action_parameters = {
+        uri = {
+          path = {
+            expression = "concat(http.request.uri.path, \".html\")"
+          }
+        }
+      }
+    },
+  ]
+}
+
 # Canonicalises `www` to the apex domain.
 #
 # Cloudflare forwards the hostname the visitor requested as the Host header, and
